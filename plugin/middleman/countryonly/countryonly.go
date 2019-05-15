@@ -12,7 +12,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-package blackwhite
+package countryonly
 
 import (
 	"bytes"
@@ -30,20 +30,19 @@ import (
 
 var Dial x.Dialer = x.DefaultDial
 
-// BlackWhite is a middleman.
-type BlackWhite struct {
-	Mode         string // mode is white or black
+// CountryOnly is a middleman.
+type CountryOnly struct {
 	Domains      map[string]byte
 	Nets         []*net.IPNet
 	Timeout      int
 	Deadline     int
 	Socks5Handle socks5.Handler
-	BlackDNS     string
-	WhiteDNS     string
+	InboundDNS   string
+	CountryDNS   string
 }
 
-// NewBlackWhite returns a BlackWhite.
-func NewBlackWhite(mode, domainURL, cidrURL, blackDNS, whiteDNS string, timeout, deadline int) (*BlackWhite, error) {
+// NewCountryOnly returns a CountryOnly.
+func NewCountryOnly(domainURL, cidrURL, inboundDNS, countryDNS string, timeout, deadline int) (*CountryOnly, error) {
 	ds := make(map[string]byte)
 	ns := make([]*net.IPNet, 0)
 	if domainURL != "" {
@@ -77,20 +76,19 @@ func NewBlackWhite(mode, domainURL, cidrURL, blackDNS, whiteDNS string, timeout,
 			ns = append(ns, in)
 		}
 	}
-	return &BlackWhite{
-		Mode:         mode,
+	return &CountryOnly{
 		Domains:      ds,
 		Nets:         ns,
 		Timeout:      timeout,
 		Deadline:     deadline,
 		Socks5Handle: &socks5.DefaultHandle{},
-		WhiteDNS:     whiteDNS,
-		BlackDNS:     blackDNS,
+		InboundDNS:   inboundDNS,
+		CountryDNS:   countryDNS,
 	}, nil
 }
 
 // Has domain or IP.
-func (b *BlackWhite) Has(host string) bool {
+func (b *CountryOnly) Has(host string) bool {
 	ip := net.ParseIP(host)
 	if ip != nil {
 		for _, v := range b.Nets {
@@ -116,16 +114,13 @@ func (b *BlackWhite) Has(host string) bool {
 }
 
 // TCPHandle handles tcp request.
-func (b *BlackWhite) TCPHandle(s *socks5.Server, c *net.TCPConn, r *socks5.Request) (bool, error) {
+func (b *CountryOnly) TCPHandle(s *socks5.Server, c *net.TCPConn, r *socks5.Request) (bool, error) {
 	if r.Cmd == socks5.CmdConnect {
 		h, _, err := net.SplitHostPort(r.Address())
 		if err != nil {
 			return false, err
 		}
-		if b.Mode == "white" && !b.Has(h) {
-			return false, nil
-		}
-		if b.Mode == "black" && b.Has(h) {
+		if b.Has(h) {
 			return false, nil
 		}
 		if err := b.Socks5Handle.TCPHandle(s, c, r); err != nil {
@@ -137,8 +132,8 @@ func (b *BlackWhite) TCPHandle(s *socks5.Server, c *net.TCPConn, r *socks5.Reque
 }
 
 // UDPHandle handles udp packet.
-func (b *BlackWhite) UDPHandle(s *socks5.Server, ca *net.UDPAddr, d *socks5.Datagram) (bool, error) {
-	if d.Address() == b.BlackDNS {
+func (b *CountryOnly) UDPHandle(s *socks5.Server, ca *net.UDPAddr, d *socks5.Datagram) (bool, error) {
+	if d.Address() == b.InboundDNS {
 		done, err := b.DNSHandle(s, ca, d)
 		if err != nil || done {
 			return done, err
@@ -148,10 +143,7 @@ func (b *BlackWhite) UDPHandle(s *socks5.Server, ca *net.UDPAddr, d *socks5.Data
 	if err != nil {
 		return false, err
 	}
-	if b.Mode == "white" && !b.Has(h) {
-		return false, nil
-	}
-	if b.Mode == "black" && b.Has(h) {
+	if b.Has(h) {
 		return false, nil
 	}
 	if err := b.Socks5Handle.UDPHandle(s, ca, d); err != nil {
@@ -161,7 +153,7 @@ func (b *BlackWhite) UDPHandle(s *socks5.Server, ca *net.UDPAddr, d *socks5.Data
 }
 
 // DNSHandle handles DNS query.
-func (b *BlackWhite) DNSHandle(s *socks5.Server, addr *net.UDPAddr, d *socks5.Datagram) (bool, error) {
+func (b *CountryOnly) DNSHandle(s *socks5.Server, addr *net.UDPAddr, d *socks5.Datagram) (bool, error) {
 	bye := func() {
 		v, ok := s.TCPUDPAssociate.Get(addr.String())
 		if ok {
@@ -175,22 +167,18 @@ func (b *BlackWhite) DNSHandle(s *socks5.Server, addr *net.UDPAddr, d *socks5.Da
 		bye()
 		return true, err
 	}
-	white := false
+	todo := false
 	for _, v := range m.Question {
-		if len(v.Name) > 0 && b.Mode == "white" && b.Has(v.Name[0:len(v.Name)-1]) {
-			white = true
-			break
-		}
-		if len(v.Name) > 0 && b.Mode == "black" && !b.Has(v.Name[0:len(v.Name)-1]) {
-			white = true
+		if len(v.Name) > 0 && b.Has(v.Name[0:len(v.Name)-1]) {
+			todo = true
 			break
 		}
 	}
-	if !white {
+	if !todo {
 		return false, nil
 	}
 
-	conn, err := Dial.Dial("udp", b.WhiteDNS)
+	conn, err := Dial.Dial("udp", b.CountryDNS)
 	if err != nil {
 		bye()
 		return true, err
@@ -207,7 +195,7 @@ func (b *BlackWhite) DNSHandle(s *socks5.Server, addr *net.UDPAddr, d *socks5.Da
 		return true, err
 	}
 	if m1.MsgHdr.Truncated {
-		conn, err := Dial.Dial("tcp", b.WhiteDNS)
+		conn, err := Dial.Dial("tcp", b.CountryDNS)
 		if err != nil {
 			bye()
 			return true, err
@@ -245,15 +233,12 @@ func (b *BlackWhite) DNSHandle(s *socks5.Server, addr *net.UDPAddr, d *socks5.Da
 }
 
 // Handle handles http proxy request, if the domain is in the white list.
-func (b *BlackWhite) Handle(method, addr string, request []byte, conn *net.TCPConn) (handled bool, err error) {
+func (b *CountryOnly) Handle(method, addr string, request []byte, conn *net.TCPConn) (handled bool, err error) {
 	h, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return false, err
 	}
-	if b.Mode == "white" && !b.Has(h) {
-		return false, nil
-	}
-	if b.Mode == "black" && b.Has(h) {
+	if b.Has(h) {
 		return false, nil
 	}
 

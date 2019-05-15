@@ -1,3 +1,17 @@
+// Copyright (c) 2016-present Cloud <cloud@txthinking.com>
+//
+// This program is free software; you can redistribute it and/or
+// modify it under the terms of version 3 of the GNU General Public
+// License as published by the Free Software Foundation.
+//
+// This program is distributed in the hope that it will be useful, but
+// WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 package brook
 
 import (
@@ -14,18 +28,23 @@ import (
 	"github.com/txthinking/gotun2socks/tun"
 )
 
-// VPN
+// VPN.
 type VPN struct {
-	Client         *Client
-	Tunnel         *Tunnel
-	Tun            *gotun2socks.Tun2Socks
-	ServerIP       string
-	TunGateway     string
-	DefaultGateway string
+	Client             *Client
+	Tunnel             *Tunnel
+	Tun                *gotun2socks.Tun2Socks
+	ServerIP           string
+	TunGateway         string
+	OriginalDNSServers []string
 }
 
-// NewVPN
-func NewVPN(addr, server, password string, tcpTimeout, tcpDeadline, udpDeadline, udpSessionTime int, tunDevice, tunIP, tunGateway, tunMask, defaultGateway string) (*VPN, error) {
+// NewVPN.
+func NewVPN(addr, server, password string, tcpTimeout, tcpDeadline, udpDeadline, udpSessionTime int, tunDevice, tunIP, tunGateway, tunMask string) (*VPN, error) {
+	ds, err := sysproxy.GetDNSServers()
+	if err != nil {
+		return nil, err
+	}
+
 	h, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
@@ -41,17 +60,10 @@ func NewVPN(addr, server, password string, tcpTimeout, tcpDeadline, udpDeadline,
 	if err != nil {
 		return nil, err
 	}
-	s := ""
-	for _, v := range l {
-		if v.To4() == nil {
-			continue
-		}
-		s = v.String()
-		break
+	if len(l) == 0 {
+		return nil, errors.New("Can not find server IP")
 	}
-	if s == "" {
-		return nil, errors.New("Can not find server v4 IP")
-	}
+	s := l[0].String()
 	server = net.JoinHostPort(s, p)
 
 	c, err := NewClient(addr, "127.0.0.1", server, password, tcpTimeout, tcpDeadline, udpDeadline, udpSessionTime)
@@ -66,20 +78,20 @@ func NewVPN(addr, server, password string, tcpTimeout, tcpDeadline, udpDeadline,
 	if err != nil {
 		return nil, err
 	}
-	t := gotun2socks.New(f, addr, []string{"8.8.8.8"}, true, true)
+	t := gotun2socks.New(f, addr, []string{"8.8.8.8"}, false, true)
 	return &VPN{
-		Client:         c,
-		Tunnel:         tl,
-		Tun:            t,
-		ServerIP:       s,
-		TunGateway:     tunGateway,
-		DefaultGateway: defaultGateway,
+		Client:             c,
+		Tunnel:             tl,
+		Tun:                t,
+		ServerIP:           s,
+		TunGateway:         tunGateway,
+		OriginalDNSServers: ds,
 	}, nil
 }
 
-// ListenAndServe starts to run VPN
+// ListenAndServe starts to run VPN.
 func (v *VPN) ListenAndServe() error {
-	if err := sysproxy.SetDNSServer("127.0.0.1"); err != nil {
+	if err := sysproxy.SetDNSServers([]string{"127.0.0.1"}); err != nil {
 		return err
 	}
 	if err := v.AddRoutes(); err != nil {
@@ -111,10 +123,10 @@ func (v *VPN) ListenAndServe() error {
 	return err
 }
 
-// Shutdown stops VPN
+// Shutdown stops VPN.
 func (v *VPN) Shutdown() error {
 	fmt.Println("Quitting...")
-	if err := sysproxy.SetDNSServer("8.8.8.8"); err != nil {
+	if err := sysproxy.SetDNSServers(v.OriginalDNSServers); err != nil {
 		log.Println(err)
 	}
 	if err := v.DeleteRoutes(); err != nil {

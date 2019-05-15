@@ -1,7 +1,22 @@
+// Copyright (c) 2016-present Cloud <cloud@txthinking.com>
+//
+// This program is free software; you can redistribute it and/or
+// modify it under the terms of version 3 of the GNU General Public
+// License as published by the Free Software Foundation.
+//
+// This program is distributed in the hope that it will be useful, but
+// WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 package main
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -19,7 +34,7 @@ var debugAddress string
 func main() {
 	app := cli.NewApp()
 	app.Name = "Brook"
-	app.Version = "20181212"
+	app.Version = "20190401"
 	app.Usage = "A Cross-Platform Proxy/VPN Software"
 	app.Author = "Cloud"
 	app.Email = "cloud@txthinking.com"
@@ -283,7 +298,7 @@ func main() {
 				},
 				cli.StringFlag{
 					Name:  "server, s",
-					Usage: "Server address, must use IP, like: 1.2.3.4:1080",
+					Usage: "Server address, like: 1.2.3.4:1080",
 				},
 				cli.StringFlag{
 					Name:  "password, p",
@@ -329,10 +344,6 @@ func main() {
 					Usage: "tun mask",
 					Value: "255.255.255.0",
 				},
-				cli.StringFlag{
-					Name:  "defaultGateway",
-					Usage: "Your default gateway, Only needed on windows that are not utf8 encoded.",
-				},
 			},
 			Action: func(c *cli.Context) error {
 				if c.String("listen") == "" || c.String("server") == "" || c.String("password") == "" {
@@ -342,7 +353,7 @@ func main() {
 				if debug {
 					enableDebug()
 				}
-				return brook.RunVPN(c.String("listen"), c.String("server"), c.String("password"), c.Int("tcpTimeout"), c.Int("tcpDeadline"), c.Int("udpDeadline"), c.Int("udpSessionTime"), c.String("tunDevice"), c.String("tunIP"), c.String("tunGateway"), c.String("tunMask"), c.String("defaultGateway"))
+				return brook.RunVPN(c.String("listen"), c.String("server"), c.String("password"), c.Int("tcpTimeout"), c.Int("tcpDeadline"), c.Int("udpDeadline"), c.Int("udpSessionTime"), c.String("tunDevice"), c.String("tunIP"), c.String("tunGateway"), c.String("tunMask"))
 			},
 		},
 		cli.Command{
@@ -628,6 +639,28 @@ func main() {
 					}
 				}()
 				return <-errch
+			},
+		},
+		cli.Command{
+			Name:  "link",
+			Usage: "Print brook link",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "server, s",
+					Usage: "Server address, like: 1.2.3.4:1080",
+				},
+				cli.StringFlag{
+					Name:  "password, p",
+					Usage: "Server password",
+				},
+			},
+			Action: func(c *cli.Context) error {
+				if c.String("server") == "" || c.String("password") == "" {
+					cli.ShowCommandHelp(c, "link")
+					return nil
+				}
+				fmt.Println(brook.Link(c.String("server"), c.String("password")))
+				return nil
 			},
 		},
 		cli.Command{

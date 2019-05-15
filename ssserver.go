@@ -1,3 +1,17 @@
+// Copyright (c) 2016-present Cloud <cloud@txthinking.com>
+//
+// This program is free software; you can redistribute it and/or
+// modify it under the terms of version 3 of the GNU General Public
+// License as published by the Free Software Foundation.
+//
+// This program is distributed in the hope that it will be useful, but
+// WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 package brook
 
 import (
@@ -14,7 +28,7 @@ import (
 	"github.com/txthinking/x"
 )
 
-// SSServer
+// SSServer.
 type SSServer struct {
 	Password     []byte
 	TCPAddr      *net.TCPAddr
@@ -27,7 +41,7 @@ type SSServer struct {
 	UDPDeadline  int
 }
 
-// NewSSServer
+// NewSSServer.
 func NewSSServer(addr, password string, tcpTimeout, tcpDeadline, udpDeadline int) (*SSServer, error) {
 	taddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
@@ -50,7 +64,7 @@ func NewSSServer(addr, password string, tcpTimeout, tcpDeadline, udpDeadline int
 	return s, nil
 }
 
-// ListenAndServe server
+// ListenAndServe server.
 func (s *SSServer) ListenAndServe() error {
 	errch := make(chan error)
 	go func() {
@@ -62,7 +76,7 @@ func (s *SSServer) ListenAndServe() error {
 	return <-errch
 }
 
-// RunTCPServer starts tcp server
+// RunTCPServer starts tcp server.
 func (s *SSServer) RunTCPServer() error {
 	var err error
 	s.TCPListen, err = net.ListenTCP("tcp", s.TCPAddr)
@@ -97,7 +111,7 @@ func (s *SSServer) RunTCPServer() error {
 	return nil
 }
 
-// RunUDPServer starts udp server
+// RunUDPServer starts udp server.
 func (s *SSServer) RunUDPServer() error {
 	var err error
 	s.UDPConn, err = net.ListenUDP("udp", s.UDPAddr)
@@ -121,7 +135,7 @@ func (s *SSServer) RunUDPServer() error {
 	return nil
 }
 
-// TCPHandle handle request
+// TCPHandle handles request.
 func (s *SSServer) TCPHandle(c *net.TCPConn) error {
 	cc, err := s.WrapCipherConn(c)
 	if err != nil {
@@ -164,6 +178,9 @@ func (s *SSServer) TCPHandle(c *net.TCPConn) error {
 	}
 	address := socks5.ToAddress(bb[0], addr, port)
 
+	if Debug {
+		log.Println("Dial TCP", address)
+	}
 	tmp, err := Dial.Dial("tcp", address)
 	if err != nil {
 		return err
@@ -181,7 +198,6 @@ func (s *SSServer) TCPHandle(c *net.TCPConn) error {
 		}
 	}
 
-	// TODO
 	go func() {
 		iv := make([]byte, aes.BlockSize)
 		if _, err := io.ReadFull(rand.Reader, iv); err != nil {
@@ -192,13 +208,41 @@ func (s *SSServer) TCPHandle(c *net.TCPConn) error {
 			log.Println(err)
 			return
 		}
-		_, _ = io.Copy(cc, rc)
+		var bf [1024 * 2]byte
+		for {
+			if s.TCPDeadline != 0 {
+				if err := rc.SetDeadline(time.Now().Add(time.Duration(s.TCPDeadline) * time.Second)); err != nil {
+					return
+				}
+			}
+			i, err := rc.Read(bf[:])
+			if err != nil {
+				return
+			}
+			if _, err := cc.Write(bf[0:i]); err != nil {
+				return
+			}
+		}
 	}()
-	_, _ = io.Copy(rc, cc)
+	var bf [1024 * 2]byte
+	for {
+		if s.TCPDeadline != 0 {
+			if err := cc.SetDeadline(time.Now().Add(time.Duration(s.TCPDeadline) * time.Second)); err != nil {
+				return nil
+			}
+		}
+		i, err := cc.Read(bf[:])
+		if err != nil {
+			return nil
+		}
+		if _, err := rc.Write(bf[0:i]); err != nil {
+			return nil
+		}
+	}
 	return nil
 }
 
-// UDPHandle handle packet
+// UDPHandle handles packet.
 func (s *SSServer) UDPHandle(addr *net.UDPAddr, b []byte) error {
 	a, h, p, data, err := s.Decrypt(b)
 	if err != nil {
@@ -220,6 +264,9 @@ func (s *SSServer) UDPHandle(addr *net.UDPAddr, b []byte) error {
 	}
 	address := socks5.ToAddress(a, h, p)
 
+	if Debug {
+		log.Println("Dial UDP", address)
+	}
 	c, err := Dial.Dial("udp", address)
 	if err != nil {
 		return err
@@ -271,7 +318,7 @@ func (s *SSServer) UDPHandle(addr *net.UDPAddr, b []byte) error {
 	return nil
 }
 
-// WrapChiperConn make a chiper conn
+// WrapChiperConn makes a chiper conn.
 func (s *SSServer) WrapCipherConn(conn net.Conn) (*CipherConn, error) {
 	iv := make([]byte, aes.BlockSize)
 	if _, err := io.ReadFull(conn, iv); err != nil {
@@ -280,7 +327,7 @@ func (s *SSServer) WrapCipherConn(conn net.Conn) (*CipherConn, error) {
 	return NewCipherConn(conn, s.Password, iv)
 }
 
-// Encrypt data
+// Encrypt data.
 func (s *SSServer) Encrypt(a byte, h, p, d []byte) ([]byte, error) {
 	b := make([]byte, 0, 7)
 	b = append(b, a)
@@ -290,7 +337,7 @@ func (s *SSServer) Encrypt(a byte, h, p, d []byte) ([]byte, error) {
 	return x.AESCFBEncrypt(b, s.Password)
 }
 
-// Decrypt data
+// Decrypt data.
 func (s *SSServer) Decrypt(cd []byte) (a byte, addr, port, data []byte, err error) {
 	var bb []byte
 	bb, err = x.AESCFBDecrypt(cd, s.Password)
@@ -344,7 +391,7 @@ func (s *SSServer) Decrypt(cd []byte) (a byte, addr, port, data []byte, err erro
 	return
 }
 
-// Shutdown server
+// Shutdown server.
 func (s *SSServer) Shutdown() error {
 	var err, err1 error
 	if s.TCPListen != nil {

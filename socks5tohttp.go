@@ -1,9 +1,22 @@
+// Copyright (c) 2016-present Cloud <cloud@txthinking.com>
+//
+// This program is free software; you can redistribute it and/or
+// modify it under the terms of version 3 of the GNU General Public
+// License as published by the Free Software Foundation.
+//
+// This program is distributed in the hope that it will be useful, but
+// WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 package brook
 
 import (
 	"bytes"
 	"errors"
-	"io"
 	"log"
 	"net"
 	"time"
@@ -44,7 +57,7 @@ func NewSocks5ToHTTP(addr, socks5addr string, timeout, deadline int) (*Socks5ToH
 	}, nil
 }
 
-// SetHTTPMiddleman sets httpmiddleman plugin
+// SetHTTPMiddleman sets httpmiddleman plugin.
 func (s *Socks5ToHTTP) SetHTTPMiddleman(m plugin.HTTPMiddleman) {
 	s.HTTPMiddleman = m
 }
@@ -123,6 +136,9 @@ func (s *Socks5ToHTTP) Handle(c *net.TCPConn) error {
 		}
 	}
 
+	if Debug {
+		log.Println("Dial TCP", addr)
+	}
 	tmp, err := s.Dial.Dial("tcp", addr)
 	if err != nil {
 		return err
@@ -150,11 +166,38 @@ func (s *Socks5ToHTTP) Handle(c *net.TCPConn) error {
 			return err
 		}
 	}
-	// TODO
 	go func() {
-		_, _ = io.Copy(rc, c)
+		var bf [1024 * 2]byte
+		for {
+			if s.Deadline != 0 {
+				if err := rc.SetDeadline(time.Now().Add(time.Duration(s.Deadline) * time.Second)); err != nil {
+					return
+				}
+			}
+			i, err := rc.Read(bf[:])
+			if err != nil {
+				return
+			}
+			if _, err := c.Write(bf[0:i]); err != nil {
+				return
+			}
+		}
 	}()
-	_, _ = io.Copy(c, rc)
+	var bf [1024 * 2]byte
+	for {
+		if s.Deadline != 0 {
+			if err := c.SetDeadline(time.Now().Add(time.Duration(s.Deadline) * time.Second)); err != nil {
+				return nil
+			}
+		}
+		i, err := c.Read(bf[:])
+		if err != nil {
+			return nil
+		}
+		if _, err := rc.Write(bf[0:i]); err != nil {
+			return nil
+		}
+	}
 	return nil
 }
 

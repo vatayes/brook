@@ -12,12 +12,25 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-// +build !linux
-
 package brook
 
-import "errors"
+import (
+	"os"
 
-func RunTproxy(address, server, password string, tcpTimeout, tcpDeadline, udpDeadline int) error {
-	return errors.New("Only works on Linux")
+	"github.com/mdp/qrterminal"
+	"github.com/txthinking/x"
+)
+
+// Link
+func Link(server, password string) string {
+	s := server + " " + password
+	s = "brook://" + x.URIEscape(s)
+	return s
+}
+
+// QR generate and print QR code.
+func QR(server, password string) {
+	s := server + " " + password
+	s = "brook://" + x.URIEscape(s)
+	qrterminal.GenerateHalfBlock(s, qrterminal.L, os.Stdout)
 }
